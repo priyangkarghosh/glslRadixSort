@@ -1,0 +1,29 @@
+#version 430
+
+// constants
+// limit is 256, since otherwise integer overflow occurs in prefix sum step
+// --> 32/4 = 8, and 2^8 is a maximum of 256
+#define SCAN_BLOCK_SIZE ((SCAN_BLOCK_SIZE))
+#define SCAN_INPUT_BUFFER_BINDING ((SCAN_INPUT_BUFFER_BINDING))
+#define SCAN_BLOCK_SUM_BUFFER_BINDING ((SCAN_BLOCK_SUM_BUFFER_BINDING))
+
+// buffers
+layout(local_size_x=SCAN_BLOCK_SIZE) in;
+layout(std430, binding=SCAN_INPUT_BUFFER_BINDING) buffer InputBuffer {
+    uint in_values[];
+};
+layout(std430, binding=SCAN_BLOCK_SUM_BUFFER_BINDING) buffer BlockSums {
+    uint block_sums[];
+}; // assume buffer is rebinded to a different offset each pass
+
+// total # of elements to be scanned
+uniform uint num_elements;
+uniform uint input_offset;
+uniform uint block_sum_offset;
+
+void main() {
+    uint wid = gl_WorkGroupID.x;
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= num_elements || wid == 0) return;
+    in_values[input_offset + gid] += block_sums[wid + block_sum_offset];
+}

@@ -1,0 +1,62 @@
+#version 430
+
+// constants
+// limit is 256, since otherwise integer overflow occurs in prefix sum step
+// --> 32/4 = 8, and 2^8 is a maximum of 256
+#define SORT_BLOCK_SIZE ((SORT_BLOCK_SIZE))
+#define SORT_BUFFER_CAPACITY ((SORT_BUFFER_CAPACITY))
+// ^since each bucket requires a seperate block sum
+
+#define SORT_INPUT_BUFFER_BINDING ((SORT_INPUT_BUFFER_BINDING))
+#define SORT_OUTPUT_BUFFER_BINDING ((SORT_OUTPUT_BUFFER_BINDING))
+#define SORT_LOCAL_RANKS_BUFFER_BINDING ((SORT_LOCAL_RANKS_BUFFER_BINDING))
+#define SORT_BLOCK_SUM_BUFFER_BINDING ((SORT_BLOCK_SUM_BUFFER_BINDING))
+
+const uint BLOCK_SUM_BUCKET_LENGTH = (SORT_BUFFER_CAPACITY + SORT_BLOCK_SIZE - 1) / SORT_BLOCK_SIZE;
+const uint BLOCK_SUM_LENGTH = BLOCK_SUM_BUCKET_LENGTH * 4;
+
+// buffers
+layout(local_size_x=SORT_BLOCK_SIZE) in;
+layout(std430, binding=SORT_INPUT_BUFFER_BINDING) buffer InputBuffer {
+    uint in_keys[SORT_BUFFER_CAPACITY];
+    uint in_values[SORT_BUFFER_CAPACITY];
+};
+layout(std430, binding=SORT_OUTPUT_BUFFER_BINDING) buffer OutputBuffer {
+    uint out_keys[SORT_BUFFER_CAPACITY];
+    uint out_values[SORT_BUFFER_CAPACITY];
+};
+layout(std430, binding=SORT_LOCAL_RANKS_BUFFER_BINDING) buffer LocalRanks {
+    uint local_ranks[SORT_BUFFER_CAPACITY];
+};
+layout(std430, binding=SORT_BLOCK_SUM_BUFFER_BINDING) buffer BlockSums {
+    uint block_sums[BLOCK_SUM_LENGTH];
+};
+
+// uniforms
+uniform uint num_elements; // # of elements to be sorted
+uniform uint current_pass; // current pass of radix sort
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    if (gid >= num_elements) return;
+
+    // get the element from the input array
+    uint tid = gl_LocalInvocationID.x;
+    uvec2 elem = uvec2(in_keys[gid], in_values[gid]);
+
+    // calculate the radix from the key
+    uint radix = (elem.x >> (current_pass * 2)) & 0x3u;
+
+    // access the local rank and use it to calculate the global position
+    uint local_rank = local_ranks[gid];
+    uint global_rank = block_sums[BLOCK_SUM_BUCKET_LENGTH * radix + gl_WorkGroupID.x];
+    uint global_pos = local_rank + global_rank;
+    barrier();
+
+    // ensure global pos is within a valid range
+    if (global_pos >= num_elements) return;
+
+    // set the output using double buffering
+    out_keys[global_pos] = elem.x;
+    out_values[global_pos] = elem.y;
+}
